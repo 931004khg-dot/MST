@@ -362,21 +362,24 @@
 ;;; C. 그룹 찾기 및 색상 지정
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-(defun mst-find-and-color-groups (data target-layer / plines valid-groups region-texts-ss i region-texts region-idx main-pline-entity region-pts txt region-vla-obj min-pt-sa max-pt-sa region-center text-distances sorted-distances sorted-texts group-name group-ss old-cmdecho copied-pline-vla copied-pline-ent copied-texts-ent copied-txt-vla txt-ent txt-vla all-texts-list auto-grouped-texts-list ungrouped-texts-list auto-processed-objects local-created-group-names group-color temp-text-obj note-text note-pos note-obj note-align-pos this-group-notes group-members-sa groups new-group candidate-texts filtered-texts nearest-pline)
+(defun mst-find-and-color-groups (data target-layer / plines valid-groups region-texts-ss i region-texts region-idx main-pline-entity region-pts txt region-vla-obj min-pt-sa max-pt-sa region-center text-distances sorted-distances sorted-texts group-name group-ss old-cmdecho copied-pline-vla copied-pline-ent copied-texts-ent copied-txt-vla txt-ent txt-vla all-texts-list auto-grouped-texts-list ungrouped-texts-list auto-processed-objects local-created-group-names group-color temp-text-obj note-text note-pos note-obj note-align-pos this-group-notes group-members-sa groups new-group candidate-texts filtered-texts nearest-pline processed-plines remaining-plines)
   (princ "\n[4/7] 유효한 그룹을 찾고 복사본을 생성합니다...")
-  (setq plines (car data) all-texts-list (cadr data) valid-groups nil region-idx 0 local-created-group-names nil auto-grouped-texts-list nil auto-processed-objects nil)
+  (setq plines (car data) all-texts-list (cadr data) valid-groups nil region-idx 0 local-created-group-names nil auto-grouped-texts-list nil auto-processed-objects nil processed-plines nil)
   (setq old-cmdecho (getvar "CMDECHO")) (setvar "CMDECHO" 0)
   (foreach region temp-regions
     (setq main-pline-entity (nth region-idx plines) region-vla-obj (vlax-ename->vla-object region) region-pts (mst-get-lwpolyline-points region) region-texts nil)
     (vla-getBoundingBox region-vla-obj 'min-pt-sa 'max-pt-sa)
     (setq region-center (list (/ (+ (car (vlax-safearray->list min-pt-sa)) (car (vlax-safearray->list max-pt-sa))) 2.0) (/ (+ (cadr (vlax-safearray->list min-pt-sa)) (cadr (vlax-safearray->list max-pt-sa))) 2.0) 0.0))
     
+    ;; 이미 처리된 폴리라인을 제외한 나머지 폴리라인 목록
+    (setq remaining-plines (vl-remove-if '(lambda (p) (member p processed-plines)) plines))
+    
     ;; 모든 텍스트 중에서 이 폴리라인에 가장 가까운 텍스트만 필터링
     (setq filtered-texts nil)
     (foreach txt all-texts-list
       (if (not (member txt auto-grouped-texts-list))
         (progn
-          (setq nearest-pline (mst-find-nearest-pline txt plines))
+          (setq nearest-pline (mst-find-nearest-pline txt remaining-plines))
           (if (equal nearest-pline main-pline-entity)
             (setq filtered-texts (cons txt filtered-texts))
           )
@@ -442,6 +445,8 @@
         )
       )
     )
+    ;; 현재 폴리라인을 처리 완료 목록에 추가
+    (setq processed-plines (cons main-pline-entity processed-plines))
     (setq region-idx (1+ region-idx))
   )
   (setq ungrouped-texts-list (vl-remove-if '(lambda (x) (member x auto-grouped-texts-list)) all-texts-list))
