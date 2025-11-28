@@ -288,15 +288,15 @@
           (if (and plines texts)
             (progn
               ;; 폴리라인 정렬: 위→아래(Y좌표 내림차순), 왼쪽→오른쪽(X좌표 오름차순)
-              (setq plines (vl-sort plines '(lambda (p1 p2 / y1 y2 x1 x2)
+              (setq plines (vl-sort plines '(lambda (p1 p2 / y1 y2 x1 x2 y-diff)
                 (setq y1 (mst-get-pline-y-center p1))
                 (setq y2 (mst-get-pline-y-center p2))
                 (setq x1 (car (mst-get-pline-x-range p1)))
                 (setq x2 (car (mst-get-pline-x-range p2)))
+                (setq y-diff (abs (- y1 y2)))
                 (cond
-                  ((> y1 y2) t)      ; Y좌표가 높은 것(위) 먼저
-                  ((< y1 y2) nil)
-                  (t (< x1 x2))      ; Y가 같으면 X좌표가 작은 것(왼쪽) 먼저
+                  ((> y-diff 0.01) (> y1 y2))    ; Y좌표 차이가 있으면 높은 것(위) 먼저
+                  (t (< x1 x2))                  ; Y가 같으면 X좌표가 작은 것(왼쪽) 먼저
                 )
               )))
               (princ (strcat "\n  - 폴리선(지시선 포함): " (itoa (length plines)) "개, 텍스트: " (itoa (length texts)) "개"))
