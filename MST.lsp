@@ -370,30 +370,23 @@
     (setq main-pline-entity (nth region-idx plines) region-vla-obj (vlax-ename->vla-object region) region-pts (mst-get-lwpolyline-points region) region-texts nil)
     (vla-getBoundingBox region-vla-obj 'min-pt-sa 'max-pt-sa)
     (setq region-center (list (/ (+ (car (vlax-safearray->list min-pt-sa)) (car (vlax-safearray->list max-pt-sa))) 2.0) (/ (+ (cadr (vlax-safearray->list min-pt-sa)) (cadr (vlax-safearray->list max-pt-sa))) 2.0) 0.0))
-    (if (setq region-texts-ss (ssget "_CP" region-pts (list '(0 . "TEXT") (cons 8 target-layer))))
-      (progn
-        ;; 영역 안의 모든 텍스트를 후보로 수집
-        (setq i 0 candidate-texts nil)
-        (repeat (sslength region-texts-ss) 
-          (setq txt (ssname region-texts-ss i)) 
-          (if (not (member txt auto-grouped-texts-list))
-            (setq candidate-texts (cons txt candidate-texts))
-          )
-          (setq i (1+ i))
-        )
-        
-        ;; 후보 텍스트 중 이 폴리라인에 가장 가까운 텍스트만 필터링
-        (setq filtered-texts nil)
-        (foreach txt candidate-texts
+    
+    ;; 모든 텍스트 중에서 이 폴리라인에 가장 가까운 텍스트만 필터링
+    (setq filtered-texts nil)
+    (foreach txt all-texts-list
+      (if (not (member txt auto-grouped-texts-list))
+        (progn
           (setq nearest-pline (mst-find-nearest-pline txt plines))
           (if (equal nearest-pline main-pline-entity)
             (setq filtered-texts (cons txt filtered-texts))
           )
         )
-        
-        (if filtered-texts
-          (progn
-            ;; 필터링된 텍스트를 거리순으로 정렬
+      )
+    )
+    
+    (if filtered-texts
+      (progn
+        ;; 필터링된 텍스트를 거리순으로 정렬
             (setq text-distances nil)
             (foreach txt filtered-texts
               (setq text-distances (cons (list (distance region-center (mst-get-text-centerpoint txt)) txt) text-distances))
@@ -404,9 +397,9 @@
             (if (> (length sorted-texts) 0) (setq region-texts (cons (car sorted-texts) region-texts))) 
             (if (> (length sorted-texts) 1) (setq region-texts (cons (cadr sorted-texts) region-texts)))
             (if (and (> (length sorted-texts) 2) (< (/ (car (nth 2 sorted-distances)) (car (nth 1 sorted-distances))) 3.0)) (setq region-texts (cons (caddr sorted-texts) region-texts)))
-            (setq region-texts (reverse region-texts))
-            (if (and region-texts (or (= (length region-texts) 2) (= (length region-texts) 3)))
-              (progn
+        (setq region-texts (reverse region-texts))
+        (if (and region-texts (or (= (length region-texts) 2) (= (length region-texts) 3)))
+          (progn
                 (setq *mst-temp-group-count* (1+ *mst-temp-group-count*))
                 (setq copied-pline-vla (vla-copy (vlax-ename->vla-object main-pline-entity))) (setq copied-pline-ent (vlax-vla-object->ename copied-pline-vla)) (setq copied-texts-ent nil this-group-notes nil)
                 (setq region-texts (vl-sort region-texts '(lambda (a b) (> (cadr (mst-get-text-centerpoint a)) (cadr (mst-get-text-centerpoint b))))))
@@ -444,9 +437,7 @@
   )
 )
                 (setq local-created-group-names (cons group-name local-created-group-names)) (setq valid-groups t) (setq auto-grouped-texts-list (append auto-grouped-texts-list region-texts)) (setq auto-processed-objects (cons copied-texts-ent auto-processed-objects))
-                (setq temp-text-obj (vla-addtext (if (= (getvar "TILEMODE") 1) (vla-get-modelspace (vla-get-activedocument (vlax-get-acad-object))) (vla-get-paperspace (vla-get-activedocument (vlax-get-acad-object)))) (itoa *mst-temp-group-count*) (vlax-3d-point (mst-get-topmost-text-position region-texts)) text-height)) (vla-put-layer temp-text-obj "!-MST-TEMP") (vla-put-Color temp-text-obj 2) (vla-put-Alignment temp-text-obj 8) (vla-put-TextAlignmentPoint temp-text-obj (vlax-3d-point (mst-get-topmost-text-position region-texts))) (setq *mst-temp-numbers* (cons (vlax-vla-object->ename temp-text-obj) *mst-temp-numbers*))
-              )
-            )
+            (setq temp-text-obj (vla-addtext (if (= (getvar "TILEMODE") 1) (vla-get-modelspace (vla-get-activedocument (vlax-get-acad-object))) (vla-get-paperspace (vla-get-activedocument (vlax-get-acad-object)))) (itoa *mst-temp-group-count*) (vlax-3d-point (mst-get-topmost-text-position region-texts)) text-height)) (vla-put-layer temp-text-obj "!-MST-TEMP") (vla-put-Color temp-text-obj 2) (vla-put-Alignment temp-text-obj 8) (vla-put-TextAlignmentPoint temp-text-obj (vlax-3d-point (mst-get-topmost-text-position region-texts))) (setq *mst-temp-numbers* (cons (vlax-vla-object->ename temp-text-obj) *mst-temp-numbers*))
           )
         )
       )
