@@ -68,6 +68,60 @@
 (defun mst-get-lwpolyline-points (input-pline)
   (mapcar 'cdr (vl-remove-if-not '(lambda (x) (= (car x) 10)) (entget input-pline))))
 
+(defun mst-get-pline-x-range (pline-ent / pts x-coords)
+  ;; 폴리라인의 X 좌표 범위 반환: (min-x . max-x)
+  (setq pts (mst-get-lwpolyline-points pline-ent))
+  (setq x-coords (mapcar 'car pts))
+  (cons (apply 'min x-coords) (apply 'max x-coords))
+)
+
+(defun mst-get-pline-y-center (pline-ent / pts y-coords)
+  ;; 폴리라인의 Y 좌표 중심값 반환
+  (setq pts (mst-get-lwpolyline-points pline-ent))
+  (setq y-coords (mapcar 'cadr pts))
+  (/ (+ (apply 'min y-coords) (apply 'max y-coords)) 2.0)
+)
+
+(defun mst-text-in-pline-x-range (txt-ent pline-ent / txt-x x-range)
+  ;; 텍스트의 X 좌표가 폴리라인의 X 범위 내에 있는지 확인
+  (setq txt-x (car (mst-get-text-centerpoint txt-ent)))
+  (setq x-range (mst-get-pline-x-range pline-ent))
+  (and (>= txt-x (car x-range)) (<= txt-x (cdr x-range)))
+)
+
+(defun mst-find-nearest-pline (txt-ent plines / txt-pos txt-x txt-y min-dist nearest-pline pline pline-y-center y-dist x-range in-x-range candidates)
+  ;; 텍스트에 가장 가까운 폴리라인 찾기
+  ;; 1순위: X 범위 내에 있으면서 Y 거리가 가장 가까운 폴리라인
+  ;; 2순위: X 범위 무시하고 Y 거리가 가장 가까운 폴리라인
+  (setq txt-pos (mst-get-text-centerpoint txt-ent))
+  (setq txt-x (car txt-pos))
+  (setq txt-y (cadr txt-pos))
+  
+  ;; X 범위 내에 있는 폴리라인들 필터링
+  (setq candidates nil)
+  (foreach pline plines
+    (setq x-range (mst-get-pline-x-range pline))
+    (setq in-x-range (and (>= txt-x (car x-range)) (<= txt-x (cdr x-range))))
+    (setq pline-y-center (mst-get-pline-y-center pline))
+    (setq y-dist (abs (- txt-y pline-y-center)))
+    (if in-x-range
+      (setq candidates (cons (list y-dist pline t) candidates))
+      (setq candidates (cons (list y-dist pline nil) candidates))
+    )
+  )
+  
+  ;; X 범위 내 폴리라인이 있으면 그 중 가장 가까운 것
+  (setq candidates (vl-sort candidates '(lambda (a b) 
+    (cond
+      ((and (caddr a) (not (caddr b))) t)  ; a가 X범위 내, b는 아님
+      ((and (not (caddr a)) (caddr b)) nil) ; b가 X범위 내, a는 아님
+      (t (< (car a) (car b)))  ; 둘 다 같은 조건이면 Y거리로 비교
+    )
+  )))
+  
+  (cadr (car candidates))
+)
+
 (defun mst-group-exists-p (name / doc dictionaries group-dict)
   (setq doc (vla-get-activedocument (vlax-get-acad-object)))
   (setq dictionaries (vla-get-dictionaries doc))
@@ -296,7 +350,7 @@
 ;;; C. 그룹 찾기 및 색상 지정
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-(defun mst-find-and-color-groups (data target-layer / plines valid-groups region-texts-ss i region-texts region-idx main-pline-entity region-pts txt region-vla-obj min-pt-sa max-pt-sa region-center text-distances sorted-distances sorted-texts group-name group-ss old-cmdecho copied-pline-vla copied-pline-ent copied-texts-ent copied-txt-vla txt-ent txt-vla all-texts-list auto-grouped-texts-list ungrouped-texts-list auto-processed-objects local-created-group-names group-color temp-text-obj note-text note-pos note-obj note-align-pos this-group-notes group-members-sa groups new-group)
+(defun mst-find-and-color-groups (data target-layer / plines valid-groups region-texts-ss i region-texts region-idx main-pline-entity region-pts txt region-vla-obj min-pt-sa max-pt-sa region-center text-distances sorted-distances sorted-texts group-name group-ss old-cmdecho copied-pline-vla copied-pline-ent copied-texts-ent copied-txt-vla txt-ent txt-vla all-texts-list auto-grouped-texts-list ungrouped-texts-list auto-processed-objects local-created-group-names group-color temp-text-obj note-text note-pos note-obj note-align-pos this-group-notes group-members-sa groups new-group candidate-texts filtered-texts nearest-pline)
   (princ "\n[4/7] 유효한 그룹을 찾고 복사본을 생성합니다...")
   (setq plines (car data) all-texts-list (cadr data) valid-groups nil region-idx 0 local-created-group-names nil auto-grouped-texts-list nil auto-processed-objects nil)
   (setq old-cmdecho (getvar "CMDECHO")) (setvar "CMDECHO" 0)
@@ -306,13 +360,37 @@
     (setq region-center (list (/ (+ (car (vlax-safearray->list min-pt-sa)) (car (vlax-safearray->list max-pt-sa))) 2.0) (/ (+ (cadr (vlax-safearray->list min-pt-sa)) (cadr (vlax-safearray->list max-pt-sa))) 2.0) 0.0))
     (if (setq region-texts-ss (ssget "_CP" region-pts (list '(0 . "TEXT") (cons 8 target-layer))))
       (progn
-        (setq i 0 text-distances nil)
-        (repeat (sslength region-texts-ss) (setq txt (ssname region-texts-ss i)) (setq text-distances (cons (list (distance region-center (mst-get-text-centerpoint txt)) txt) text-distances)) (setq i (1+ i)))
-        (setq text-distances (vl-remove-if '(lambda (x) (member (cadr x) auto-grouped-texts-list)) text-distances))
-        (if text-distances
+        ;; 영역 안의 모든 텍스트를 후보로 수집
+        (setq i 0 candidate-texts nil)
+        (repeat (sslength region-texts-ss) 
+          (setq txt (ssname region-texts-ss i)) 
+          (if (not (member txt auto-grouped-texts-list))
+            (setq candidate-texts (cons txt candidate-texts))
+          )
+          (setq i (1+ i))
+        )
+        
+        ;; 후보 텍스트 중 이 폴리라인에 가장 가까운 텍스트만 필터링
+        (setq filtered-texts nil)
+        (foreach txt candidate-texts
+          (setq nearest-pline (mst-find-nearest-pline txt plines))
+          (if (equal nearest-pline main-pline-entity)
+            (setq filtered-texts (cons txt filtered-texts))
+          )
+        )
+        
+        (if filtered-texts
           (progn
-            (setq sorted-distances (vl-sort text-distances '(lambda (a b) (< (car a) (car b))))) (setq sorted-texts (mapcar 'cadr sorted-distances)) (setq region-texts nil)
-            (if (> (length sorted-texts) 0) (setq region-texts (cons (car sorted-texts) region-texts))) (if (> (length sorted-texts) 1) (setq region-texts (cons (cadr sorted-texts) region-texts)))
+            ;; 필터링된 텍스트를 거리순으로 정렬
+            (setq text-distances nil)
+            (foreach txt filtered-texts
+              (setq text-distances (cons (list (distance region-center (mst-get-text-centerpoint txt)) txt) text-distances))
+            )
+            (setq sorted-distances (vl-sort text-distances '(lambda (a b) (< (car a) (car b))))) 
+            (setq sorted-texts (mapcar 'cadr sorted-distances)) 
+            (setq region-texts nil)
+            (if (> (length sorted-texts) 0) (setq region-texts (cons (car sorted-texts) region-texts))) 
+            (if (> (length sorted-texts) 1) (setq region-texts (cons (cadr sorted-texts) region-texts)))
             (if (and (> (length sorted-texts) 2) (< (/ (car (nth 2 sorted-distances)) (car (nth 1 sorted-distances))) 3.0)) (setq region-texts (cons (caddr sorted-texts) region-texts)))
             (setq region-texts (reverse region-texts))
             (if (and region-texts (or (= (length region-texts) 2) (= (length region-texts) 3)))
